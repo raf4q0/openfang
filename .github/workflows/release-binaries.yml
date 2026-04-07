@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     name: Build ${{ matrix.target }}
-    runs-on: [self-hosted, gh-runner-01]
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
