@@ -1,8 +1,8 @@
 use crate::llm_driver::{CompletionRequest, CompletionResponse, LlmDriver, LlmError};
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::types::{
-    ContentBlock as BContentBlock, ConversationRole, InferenceConfiguration,
-    Message as BMessage, SystemContentBlock,
+    CachePointBlock, CachePointType, ContentBlock as BContentBlock, ConversationRole,
+    InferenceConfiguration, Message as BMessage, SystemContentBlock,
 };
 use openfang_types::message::{ContentBlock, MessageContent, Role, StopReason, TokenUsage};
 use tracing::debug;
@@ -21,25 +21,51 @@ impl Default for BedrockDriver {
     }
 }
 
+fn supports_prompt_caching(model_id: &str) -> bool {
+    let id = model_id.to_lowercase();
+    id.contains("claude-haiku-4")
+        || id.contains("claude-sonnet-4")
+        || id.contains("claude-opus-4")
+        || id.contains("nova-lite")
+        || id.contains("nova-micro")
+        || id.contains("nova-pro")
+        || id.contains("nova-2-lite")
+}
+
+fn make_cache_point() -> CachePointBlock {
+    CachePointBlock::builder()
+        .r#type(CachePointType::Default)
+        .build()
+        .expect("CachePointBlock requires type")
+}
+
 #[async_trait]
 impl LlmDriver for BedrockDriver {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, LlmError> {
         let aws_config = aws_config::from_env().load().await;
         let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
 
-        let system: Vec<SystemContentBlock> = request
-            .system
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .into_iter()
-            .map(|s| SystemContentBlock::Text(s.to_string()))
-            .collect();
+        let caching = supports_prompt_caching(&request.model);
+        debug!(model = %request.model, caching, "Sending Bedrock Converse request");
+
+        let system: Vec<SystemContentBlock> = {
+            let text = request.system.as_deref().filter(|s| !s.is_empty());
+            match text {
+                None => vec![],
+                Some(s) => {
+                    let mut blocks = vec![SystemContentBlock::Text(s.to_string())];
+                    if caching {
+                        blocks.push(SystemContentBlock::CachePoint(make_cache_point()));
+                    }
+                    blocks
+                }
+            }
+        };
 
         let mut messages: Vec<BMessage> = Vec::new();
-        for msg in &request.messages {
-            if msg.role == Role::System {
-                continue;
-            }
+        let non_system: Vec<_> = request.messages.iter().filter(|m| m.role != Role::System).collect();
+
+        for (i, msg) in non_system.iter().enumerate() {
             let role = match msg.role {
                 Role::User => ConversationRole::User,
                 Role::Assistant => ConversationRole::Assistant,
@@ -56,11 +82,25 @@ impl LlmDriver for BedrockDriver {
                     .collect::<Vec<_>>()
                     .join(""),
             };
-            let bedrock_msg = BMessage::builder()
-                .role(role)
-                .content(BContentBlock::Text(text))
-                .build()
-                .map_err(|e| LlmError::Http(e.to_string()))?;
+
+            let add_cache_point = caching
+                && non_system.len() >= 3
+                && i == non_system.len().saturating_sub(2);
+
+            let bedrock_msg = if add_cache_point {
+                BMessage::builder()
+                    .role(role)
+                    .content(BContentBlock::Text(text))
+                    .content(BContentBlock::CachePoint(make_cache_point()))
+                    .build()
+                    .map_err(|e| LlmError::Http(e.to_string()))?
+            } else {
+                BMessage::builder()
+                    .role(role)
+                    .content(BContentBlock::Text(text))
+                    .build()
+                    .map_err(|e| LlmError::Http(e.to_string()))?
+            };
             messages.push(bedrock_msg);
         }
 
@@ -68,8 +108,6 @@ impl LlmDriver for BedrockDriver {
             .max_tokens(request.max_tokens as i32)
             .temperature(request.temperature)
             .build();
-
-        debug!(model = %request.model, "Sending Bedrock Converse request");
 
         let mut req = client
             .converse()
@@ -102,9 +140,16 @@ impl LlmDriver for BedrockDriver {
 
         let usage = output
             .usage()
-            .map(|u| TokenUsage {
-                input_tokens: u.input_tokens() as u64,
-                output_tokens: u.output_tokens() as u64,
+            .map(|u| {
+                let cache_read = u.cache_read_input_tokens().unwrap_or(0) as u64;
+                let cache_write = u.cache_write_input_tokens().unwrap_or(0) as u64;
+                if caching && (cache_read > 0 || cache_write > 0) {
+                    debug!(cache_read, cache_write, "Bedrock prompt cache activity");
+                }
+                TokenUsage {
+                    input_tokens: u.input_tokens() as u64 + cache_read + cache_write,
+                    output_tokens: u.output_tokens() as u64,
+                }
             })
             .unwrap_or_default();
 
