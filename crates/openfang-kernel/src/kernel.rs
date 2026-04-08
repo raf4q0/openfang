@@ -5196,16 +5196,12 @@ impl OpenFangKernel {
             let mcp_candidates: Vec<ToolDefinition> = if mcp_allowlist.is_empty() {
                 mcp_tools.iter().cloned().collect()
             } else {
-                let normalized: Vec<String> = mcp_allowlist
-                    .iter()
-                    .map(|s| openfang_runtime::mcp::normalize_name(s))
-                    .collect();
+                let allowlist_refs: Vec<&str> = mcp_allowlist.iter().map(|s| s.as_str()).collect();
                 mcp_tools
                     .iter()
                     .filter(|t| {
-                        openfang_runtime::mcp::extract_mcp_server(&t.name)
-                            .map(|s| normalized.iter().any(|n| n == s))
-                            .unwrap_or(false)
+                        openfang_runtime::mcp::extract_mcp_server_from_known(&t.name, &allowlist_refs)
+                            .is_some()
                     })
                     .cloned()
                     .collect()
