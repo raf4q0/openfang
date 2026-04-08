@@ -34,6 +34,8 @@ rmcp = { workspace = true }
 http = "1"
 tokio-tungstenite = "0.24"
 shlex = "1"
+aws-config = { workspace = true }
+aws-sdk-bedrockruntime = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
