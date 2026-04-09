@@ -72,11 +72,6 @@ pub fn build_system_prompt(ctx: &PromptContext) -> String {
     // Section 1 — Agent Identity (always present)
     sections.push(build_identity_section(ctx));
 
-    // Section 1.5 — Current Date/Time (always present when set)
-    if let Some(ref date) = ctx.current_date {
-        sections.push(format!("## Current Date\nToday is {date}."));
-    }
-
     // Section 2 — Tool Call Behavior (skip for subagents)
     if !ctx.is_subagent {
         sections.push(TOOL_CALL_BEHAVIOR.to_string());
@@ -278,10 +273,20 @@ pub fn build_canonical_context_message(ctx: &PromptContext) -> Option<String> {
     if ctx.is_subagent {
         return None;
     }
-    ctx.canonical_context
-        .as_ref()
-        .filter(|c| !c.is_empty())
-        .map(|c| format!("[Previous conversation context]\n{}", cap_str(c, 500)))
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(ref date) = ctx.current_date {
+        parts.push(format!("## Current Date\nToday is {date}."));
+    }
+    if let Some(ref c) = ctx.canonical_context {
+        if !c.is_empty() {
+            parts.push(format!("[Previous conversation context]\n{}", cap_str(c, 500)));
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
 }
 
 /// Build the memory section (Section 4).
