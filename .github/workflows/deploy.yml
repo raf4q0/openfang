@@ -3,6 +3,7 @@ name: Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: deploy
@@ -37,9 +38,10 @@ jobs:
           ssh -i ~/.ssh/arise_deploy_key \
             -o StrictHostKeyChecking=no \
             ubuntu@192.168.1.13 \
-            'sudo cp /tmp/openfang-new /usr/local/bin/openfang && \
+            'sudo systemctl stop openfang && \
+             sudo cp /tmp/openfang-new /usr/local/bin/openfang && \
              sudo chmod +x /usr/local/bin/openfang && \
-             sudo systemctl restart openfang && \
+             sudo systemctl start openfang && \
              sleep 5 && \
              sudo systemctl is-active openfang'
 
