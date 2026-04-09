@@ -222,6 +222,8 @@ impl LlmDriver for BedrockDriver {
 
         let output = req.send().await.map_err(|e| {
             let msg = e.to_string();
+            let detail = format!("{e:?}");
+            warn!(model = %request.model, error = %msg, detail = %detail, "Bedrock request failed");
             if msg.contains("ResourceNotFoundException") || msg.contains("ValidationException") {
                 LlmError::ModelNotFound(request.model.clone())
             } else if msg.contains("AccessDeniedException") {
@@ -229,7 +231,7 @@ impl LlmDriver for BedrockDriver {
             } else if msg.contains("ThrottlingException") {
                 LlmError::RateLimited { retry_after_ms: 5000 }
             } else {
-                LlmError::Api { status: 0, message: msg }
+                LlmError::Api { status: 0, message: format!("{msg} — raw: {detail}") }
             }
         })?;
 
