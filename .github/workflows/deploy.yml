@@ -1,0 +1,51 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build & Deploy to openfang-lab-clara
+    runs-on: [self-hosted, arise]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: deploy-x86_64
+
+      - name: Build CLI binary
+        run: |
+          source ~/.cargo/env
+          cargo build --release -p openfang-cli
+
+      - name: Strip binary
+        run: strip target/release/openfang -o /tmp/openfang-new
+
+      - name: Deploy to server
+        run: |
+          scp -i ~/.ssh/arise_deploy_key \
+            -o StrictHostKeyChecking=no \
+            /tmp/openfang-new \
+            ubuntu@192.168.1.13:/tmp/openfang-new
+          ssh -i ~/.ssh/arise_deploy_key \
+            -o StrictHostKeyChecking=no \
+            ubuntu@192.168.1.13 \
+            'sudo cp /tmp/openfang-new /usr/local/bin/openfang && \
+             sudo chmod +x /usr/local/bin/openfang && \
+             sudo systemctl restart openfang && \
+             sleep 5 && \
+             sudo systemctl is-active openfang'
+
+      - name: Verify
+        run: |
+          ssh -i ~/.ssh/arise_deploy_key \
+            -o StrictHostKeyChecking=no \
+            ubuntu@192.168.1.13 \
+            'openfang --version && curl -sf http://localhost:4200/api/health'
