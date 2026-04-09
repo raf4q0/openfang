@@ -264,17 +264,16 @@ pub async fn run_agent_loop(
         let _ = hook_reg.fire(&ctx);
     }
 
-    // Build the system prompt — base prompt comes from kernel (prompt_builder),
-    // we append recalled memories here since they are resolved at loop time.
-    let mut system_prompt = manifest.model.system_prompt.clone();
-    if !memories.is_empty() {
+    let system_prompt = manifest.model.system_prompt.clone();
+    let recalled_memory_context = if !memories.is_empty() {
         let mem_pairs: Vec<(String, String)> = memories
             .iter()
             .map(|m| (String::new(), m.content.clone()))
             .collect();
-        system_prompt.push_str("\n\n");
-        system_prompt.push_str(&crate::prompt_builder::build_memory_section(&mem_pairs));
-    }
+        Some(crate::prompt_builder::build_memory_section(&mem_pairs))
+    } else {
+        None
+    };
 
     // Add the user message to session history.
     // When content blocks are provided (e.g. text + image from a channel),
@@ -318,16 +317,19 @@ pub async fn run_agent_loop(
     // Validate and repair session history (drop orphans, merge consecutive)
     let mut messages = crate::session_repair::validate_and_repair(&llm_messages);
 
-    // Inject canonical context as the first user message (not in system prompt)
-    // to keep the system prompt stable across turns for provider prompt caching.
-    if let Some(cc_msg) = manifest
+    let cc_base = manifest
         .metadata
         .get("canonical_context_msg")
         .and_then(|v| v.as_str())
-    {
-        if !cc_msg.is_empty() {
-            messages.insert(0, Message::user(cc_msg));
-        }
+        .filter(|s| !s.is_empty());
+    let canonical_ctx = match (cc_base, recalled_memory_context.as_deref()) {
+        (Some(base), Some(mem)) => Some(format!("{base}\n\n{mem}")),
+        (Some(base), None) => Some(base.to_string()),
+        (None, Some(mem)) => Some(mem.to_string()),
+        (None, None) => None,
+    };
+    if let Some(cc_msg) = canonical_ctx {
+        messages.insert(0, Message::user(&cc_msg));
     }
 
     let mut total_usage = TokenUsage::default();
@@ -1433,17 +1435,16 @@ pub async fn run_agent_loop_streaming(
         let _ = hook_reg.fire(&ctx);
     }
 
-    // Build the system prompt — base prompt comes from kernel (prompt_builder),
-    // we append recalled memories here since they are resolved at loop time.
-    let mut system_prompt = manifest.model.system_prompt.clone();
-    if !memories.is_empty() {
+    let system_prompt = manifest.model.system_prompt.clone();
+    let recalled_memory_context = if !memories.is_empty() {
         let mem_pairs: Vec<(String, String)> = memories
             .iter()
             .map(|m| (String::new(), m.content.clone()))
             .collect();
-        system_prompt.push_str("\n\n");
-        system_prompt.push_str(&crate::prompt_builder::build_memory_section(&mem_pairs));
-    }
+        Some(crate::prompt_builder::build_memory_section(&mem_pairs))
+    } else {
+        None
+    };
 
     // Add the user message to session history.
     // When content blocks are provided (e.g. text + image from a channel),
@@ -1483,16 +1484,19 @@ pub async fn run_agent_loop_streaming(
     // Validate and repair session history (drop orphans, merge consecutive)
     let mut messages = crate::session_repair::validate_and_repair(&llm_messages);
 
-    // Inject canonical context as the first user message (not in system prompt)
-    // to keep the system prompt stable across turns for provider prompt caching.
-    if let Some(cc_msg) = manifest
+    let cc_base = manifest
         .metadata
         .get("canonical_context_msg")
         .and_then(|v| v.as_str())
-    {
-        if !cc_msg.is_empty() {
-            messages.insert(0, Message::user(cc_msg));
-        }
+        .filter(|s| !s.is_empty());
+    let canonical_ctx = match (cc_base, recalled_memory_context.as_deref()) {
+        (Some(base), Some(mem)) => Some(format!("{base}\n\n{mem}")),
+        (Some(base), None) => Some(base.to_string()),
+        (None, Some(mem)) => Some(mem.to_string()),
+        (None, None) => None,
+    };
+    if let Some(cc_msg) = canonical_ctx {
+        messages.insert(0, Message::user(&cc_msg));
     }
 
     let mut total_usage = TokenUsage::default();

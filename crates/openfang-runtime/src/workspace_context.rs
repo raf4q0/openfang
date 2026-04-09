@@ -140,8 +140,8 @@ impl WorkspaceContext {
             parts.push("- Git repository: yes".to_string());
         }
 
-        // Include context file summaries
-        let file_names: Vec<String> = self.cache.keys().cloned().collect();
+        let mut file_names: Vec<String> = self.cache.keys().cloned().collect();
+        file_names.sort();
         for name in file_names {
             if let Some(content) = self.get_file(&name) {
                 // Take first 200 chars as preview

@@ -123,6 +123,9 @@ impl LlmDriver for BedrockDriver {
         let system: Vec<SystemContentBlock> = match request.system.as_deref().filter(|s| !s.is_empty()) {
             None => vec![],
             Some(s) => {
+                let sys_len = s.len();
+                let sys_hash = s.as_bytes().iter().fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
+                debug!(sys_len, sys_hash, "Bedrock system prompt fingerprint");
                 let mut blocks = vec![SystemContentBlock::Text(s.to_string())];
                 if caching {
                     blocks.push(SystemContentBlock::CachePoint(make_cache_point()));

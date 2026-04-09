@@ -449,13 +449,13 @@ fn build_sender_section(sender_name: Option<&str>, sender_id: Option<&str>) -> O
 fn build_peer_agents_section(self_name: &str, peers: &[(String, String, String)]) -> String {
     let mut out = String::from(
         "## Peer Agents\n\
-         You are part of a multi-agent system. These agents are running alongside you:\n",
+         You are part of a multi-agent system. These agents are available to you:\n",
     );
-    for (name, state, model) in peers {
+    for (name, _volatile_state, model) in peers {
         if name == self_name {
-            continue; // Don't list yourself
+            continue;
         }
-        out.push_str(&format!("- **{}** ({}) — model: {}\n", name, state, model));
+        out.push_str(&format!("- **{}** — model: {}\n", name, model));
     }
     out.push_str(
         "\nYou can communicate with them using `agent_send` (by name) and see all agents with `agent_list`. \
